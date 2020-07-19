@@ -1,0 +1,131 @@
+---
+title: "Practical Machine Learning Final Project"
+author: "Shaopeng Lee"
+date: "7/19/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+---
+```{r setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE,cache=TRUE)
+```
+
+## Overview
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The data consists of a Training data and a Test data (to be used to validate the selected model).
+
+The goal of your project is to predict the manner in which they did the exercise. This is the “classe” variable in the training set. You may use any of the other variables to predict with.
+
+**Note:** The dataset used in this project is a courtesy of “Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers’ Data Classification of Body Postures and Movements”
+
+## Data Loading and Processing
+```{r part1}
+testing<-read.csv("/Users/shorpen/Downloads/pml-testing.csv",na = c("", "NA"))
+training<-read.csv("/Users/shorpen/Downloads/pml-training.csv",na = c("", "NA"))
+dim(testing)
+dim(training)
+validData<- testing[, colSums(is.na(testing) )== 0]
+#removeColumns <- which(colSums(is.na(training.raw) | training.raw=="") > maxNACount)
+trainData<- training[, colSums(is.na(training)) == 0]
+dim(trainData)
+dim(validData)
+validData <- validData[, -c(1:7)]
+trainData <- trainData[, -c(1:7)]
+```
+As shown in the above, there are `r dim(training)[1]` observations and `r dim(training)[2]` variables in the Training dataset. We also observe variables that contains missing values, so we need to exclude those columns. Also, we further remove the first seven variables as they have little impact on the outcome. For now, we have two datasets, which are a training dataset used for the model training and the other is to valid the medel performance. The final input for the model traning contains r dim(trainData)[2]` variables after the feature selection.
+
+## Prepare the datasets for model training
+In this part, we will first split the training data into 70% as the real train data and 30% as test data. This process is aimed to compute the out-of-sample errors in case of the biased model. The valid dataset will remain as it is and will be used to test the predication algorithm.
+```{r part2}
+set.seed(1234) 
+library(caret)
+inTrain <- createDataPartition(trainData$classe, p = 0.7, list = FALSE)
+training <- trainData[inTrain, ]
+testing <- trainData[-inTrain, ]
+dim(training)
+dim(testing)
+```
+We pick out  `r dim(training)[2]` variables and then compute the correlation paramaters. Then, we use the correlation plot to display the relation between the variables.
+```{r part3}
+res <- cor(training[,-53])
+library(corrplot)
+corrplot(res, type = "upper", order = "FPC", tl.col = "black", tl.srt = 45)
+
+```
+
+The correlated predictors are those with a dark color. The blue means the postive and the red is negative. We use the findCorrelation function to search for highly correlated attributes with a cuttoff 0.75. The below is the names of highly correlated factors:
+```{r part4}
+highlyCorrelated = findCorrelation(res, cutoff=0.75)
+names(training)[highlyCorrelated]
+```
+
+## Model Building
+For this project, we are aimed to predict a class factor, so we will choose three different algorithms, which are classification trees, random forests and a generalized boosted model, to predict the outcome.
+1.Classification trees
+2.Random forests
+3.Generalized Boosted Model
+
+### Selection 1: Classification Trees
+```{r part5}
+set.seed(12345)
+library(rpart)
+library(rattle)
+library(e1071)
+decisionTreeModel <- rpart(classe ~., data=training, method="class")
+fancyRpartPlot(decisionTreeModel)
+predictTressModel <- predict(decisionTreeModel,testing,type="class")
+cmtree <- confusionMatrix(predictTressModel, testing$classe)
+```
+In the first part, we first fit the model and use the fancyRpartPlot() function to plot the classification tree. Then we validate the model on the test dataset to find out how well it performs by computing the accuracy.
+
+```{r part6}
+cmtree
+plot(cmtree$table, col = cmtree$byClass, 
+     main = paste("Decision Tree - Accuracy =", round(cmtree$overall['Accuracy'], 4)))
+```
+
+We can see the accuracy rate of the Classification Trees is `r cmtree$overall[1]`, which is a bit low.
+### Selection 2: Random Forest
+```{r part7}
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+library(caret)
+modFit <- train(classe ~., data=training, method="rf",trControl=controlRF)
+#modFit$finalModel
+predictRF1 <- predict(modFit, newdata=testing)
+cmrf <- confusionMatrix(predictRF1, testing$classe)
+cmrf
+plot(cmrf$table, col = cmrf$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(cmrf$overall['Accuracy'], 4)))
+```
+
+As same in the above model, we fit a random forest model this time. Also, we set up 3-fold cross validation for training. Then, we validate the model on the testing with an accuray,`r cmrf$overall[1]` under 3-fold cross validation. It is fairly high, but it might be due to overfitting.
+
+### Selection 3: Generalized Boosted Regression Models
+```{r part8}
+set.seed(12345)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modGBM  <- train(classe ~ ., data=trainData, method = "gbm", trControl = controlGBM, verbose = FALSE)
+modGBM$finalModel
+predictGBM <- predict(modGBM, newdata=testing)
+cmGBM <- confusionMatrix(predictGBM, testing$classe)
+cmGBM
+plot(cmGBM$table, col = cmGBM$byClass, main = paste("GBM Confusion Matrix: Accuracy =", round(cmGBM$overall['Accuracy'], 4)))
+```
+
+This time, we fit a gradient boosted model. Applying the same process, we got an accuracy of `r cmGBM$overall[1]` under 5-fold cross validation. The out-of-sample error is .
+
+## Model Validation
+After the comparison, we pick out the best fitted model to apply it on the validation data. The below result is our predication based on the Random Forest model.
+```{r part8.1}
+Results <- predict(modFit, newdata=validData)
+Results
+```
+The gbm model can also be used for prediction:
+```{r part9}
+predGbmTest <- predict(modGBM, newdata = validData)
+table(Results, predGbmTest)
+```
+The two models produce the same results, as shown in the confusion matrix above.
